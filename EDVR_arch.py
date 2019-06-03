@@ -41,14 +41,8 @@ class EDVR:
         out = Conv2D(self.nf, kernel_size=3, padding='same')(x)
         return add([identity, out])
     
-    def __conv1_block(self, x):
-        x = Conv2D(self.nf, 3, padding='same')(x)
-        x = LeakyReLU(alpha=0.1)(x)
-        return x
-
-    def __conv2_block(self, x):
-        x = Lambda(lambda x: K.spatial_2d_padding(x))(x)
-        x = Conv2D(self.nf, 3, strides=2, padding='valid')(x)
+    def __conv_block(self, x, stride=1):
+        x = Conv2D(self.nf, 3, strides=stride, padding='same')(x)
         x = LeakyReLU(alpha=0.1)(x)
         return x
 
@@ -57,12 +51,12 @@ class EDVR:
         return center_layer
     
     def __Predeblur_ResNet_Pyramid(self, x):
-        L1_fea = self.__conv1_block(x)
+        L1_fea = self.__conv_block(x)
         if self.HR_in:
             for i in range(2):
-                L1_fea = self.__conv2_block(L1_fea)
-        L2_fea = self.__conv2_block(L1_fea)
-        L3_fea = self.__conv2_block(L2_fea)
+                L1_fea = self.__conv_block(L1_fea, 2)
+        L2_fea = self.__conv_block(L1_fea, 2)
+        L3_fea = self.__conv_block(L2_fea, 2)
         L3_fea = self.__ResidualBlock_noBN(L3_fea)
         L3_fea = UpSampling2D(interpolation='bilinear')(L3_fea)
         L2_fea = add([self.__ResidualBlock_noBN(L2_fea), L3_fea])
@@ -93,13 +87,13 @@ class EDVR:
         # L2
         L2_offset = Concatenate()([nbr_fea_l[1], ref_fea_l[1]])
         
-        L2_offset = self.__conv1_block(L2_offset)
+        L2_offset = self.__conv_block(L2_offset)
         L3_offset = UpSampling2D(interpolation='bilinear')(L3_offset)
         L3_offset = Lambda(lambda x: x*2)(L3_offset)
         concat_offset = Concatenate()([L2_offset, L3_offset])
         
-        L2_offset = self.__conv1_block(concat_offset)
-        L2_offset = self.__conv1_block(L2_offset)
+        L2_offset = self.__conv_block(concat_offset)
+        L2_offset = self.__conv_block(L2_offset)
 
         # Deformable Conv Layer Should be here and take (nbr_fea_l[1], L2_offset) as input
         L2_fea = Conv2D(self.nf, 3, padding='same')(L2_offset)
@@ -108,16 +102,16 @@ class EDVR:
         #                                  num_deformable_group=groups)(nbr_fea_l[1], L2_offset)
         L3_fea = UpSampling2D(interpolation='bilinear')(L3_fea)
         concat_fea = Concatenate()([L2_fea, L3_fea])
-        L2_fea = self.__conv1_block(concat_fea)
+        L2_fea = self.__conv_block(concat_fea)
 
         # L1
         L1_offset = Concatenate()([nbr_fea_l[0], ref_fea_l[0]])
-        L1_offset = self.__conv1_block(L1_offset)
+        L1_offset = self.__conv_block(L1_offset)
         L2_offset = UpSampling2D(interpolation='bilinear')(L2_offset)
         L2_offset = Lambda(lambda x: x*2)(L2_offset)
         concat_offset = Concatenate()([L1_offset, L2_offset])
-        L1_offset = self.__conv1_block(concat_offset)
-        L1_offset = self.__conv1_block(L1_offset)
+        L1_offset = self.__conv_block(concat_offset)
+        L1_offset = self.__conv_block(L1_offset)
 
         # Deformable Conv Layer Should be here and take (nbr_fea_l[0], L1_offset) as input
         L1_fea = Conv2D(self.nf, 3, padding='same')(L1_offset)
@@ -126,12 +120,12 @@ class EDVR:
         #                                  num_deformable_group=groups)(nbr_fea_l[0], L1_offset)
         L2_fea = UpSampling2D(interpolation='bilinear')(L2_fea)
         concat_fea = Concatenate()([L1_fea, L2_fea])
-        L1_fea = self.__conv1_block(concat_fea)
+        L1_fea = self.__conv_block(concat_fea)
 
         # Cascading
         offset = Concatenate()([L1_fea, ref_fea_l[0]])
         for _ in range(2):
-            offset = self.__conv1_block(offset)
+            offset = self.__conv_block(offset)
         # Deformable Conv Layer Should be here and take (L1_fea, offset) as input
         L1_fea = Conv2D(self.nf, 3, padding='same')(offset)
         #     L1_fea = DeformableConvLayer(nf, 3, strides=1, 
@@ -187,9 +181,9 @@ class EDVR:
         att_avg = Lambda(lambda x: K.spatial_2d_padding(x))(att_L)
         att_avg = AveragePooling2D(pool_size=(3, 3), strides=(2, 2))(att_avg)
         cat_max_avg = Concatenate()([att_max, att_avg])
-        att_L = self.__conv1_block(cat_max_avg)
+        att_L = self.__conv_block(cat_max_avg)
         att_L = UpSampling2D(interpolation='bilinear')(att_L)
-        att = self.__conv1_block(att)
+        att = self.__conv_block(att)
         att = add([att, att_L])
         att = Conv2D(self.nf, 1)(att)
         att = LeakyReLU(alpha=.1)(att)
@@ -213,7 +207,7 @@ class EDVR:
             if self.HR_in:
                 self.H, self.W = self.H // 4, self.W // 4
         else:
-            L1_fea = self.__conv1_block(x_reshaped)
+            L1_fea = self.__conv_block(x_reshaped)
             if self.HR_in:
                 for i in range(2):
                     L1_fea = self.__conv2_block(L1_fea)
@@ -221,11 +215,11 @@ class EDVR:
         for _ in range(self.front_RBs):
             L1_fea = self.__ResidualBlock_noBN(L1_fea)
         # L2
-        L2_fea = self.__conv2_block(L1_fea)
-        L2_fea = self.__conv1_block(L2_fea)
+        L2_fea = self.__conv_block(L1_fea, 2)
+        L2_fea = self.__conv_block(L2_fea)
         # L3
-        L3_fea = self.__conv2_block(L2_fea)
-        L3_fea = self.__conv1_block(L3_fea)
+        L3_fea = self.__conv_block(L2_fea, 2)
+        L3_fea = self.__conv_block(L3_fea)
         
         L1_fea = Lambda(lambda x: K.reshape(x, (-1, self.nframes, self.H, self.W, self.nf)))(L1_fea)
         L2_fea = Lambda(lambda x: K.reshape(x, (-1, self.nframes, self.H//2, self.W//2, self.nf)))(L2_fea)
