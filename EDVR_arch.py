@@ -17,7 +17,6 @@ from keras import backend as K
 from subpixel import *
 from keras.models import Model
 
-
 # Paper's loss function
 def charbonnier_penalty(y_true, y_pred):
     return K.mean(K.sqrt(1e-3 + K.square(y_pred - y_true)), [1,2,3])
@@ -149,7 +148,7 @@ class EDVR:
         B, N, H, W, C = K.int_shape(aligned_fea)
         #### temporal attention
 
-        emb_ref = Conv2D(self.nf, 3, padding='same')(self.__get_center_layer(aligned_fea))
+        emb_ref = Conv2D(self.nf, 3, padding='same', name='TSA_ref')(self.__get_center_layer(aligned_fea))
         reshaped_fea = Lambda(lambda x: K.reshape(x, (-1, H, W, C)))(aligned_fea)
         reshaped_emb = Conv2D(self.nf, 3, padding='same')(reshaped_fea)
         emb = Lambda(lambda x: K.reshape(x, (-1, N, H, W, C)))(reshaped_emb)
@@ -165,23 +164,23 @@ class EDVR:
         cor_prob = Concatenate()(C*[cor_prob])
         cor_prob = Lambda(lambda x: K.reshape(x, (-1, H, W, C*N)))(cor_prob)
         aligned_fea = Lambda(lambda x: K.reshape(x, (-1, H, W, C*N)))(aligned_fea)
-        aligned_fea = Multiply()([aligned_fea, cor_prob])
+        aligned_fea = Multiply(name='aligned_features')([aligned_fea, cor_prob])
 
         #### fusion
-        fea = Conv2D(self.nf, 1)(aligned_fea)
+        fea = Conv2D(self.nf, 1, name='TSA_fusion')(aligned_fea)
         fea = LeakyReLU(alpha=.1)(fea)
         #### spatial attention
-        att = Conv2D(self.nf, 1)(aligned_fea)
+        att = Conv2D(self.nf, 1, name='Spatial_attention')(aligned_fea)
         att = LeakyReLU(alpha=.1)(att)
         att_max = Lambda(lambda x: K.spatial_2d_padding(x))(att)
         att_max = MaxPool2D(pool_size=(3, 3), strides=(2, 2))(att_max)
         att_avg = Lambda(lambda x: K.spatial_2d_padding(x))(att)
         att_avg = AveragePooling2D(pool_size=(3, 3), strides=(2, 2))(att_avg)
         cat_max_avg = Concatenate()([att_max, att_avg])
-        cat_max_avg = Conv2D(self.nf, 1)(cat_max_avg)
+        cat_max_avg = Conv2D(self.nf, 1, name='last_SA')(cat_max_avg)
         att = LeakyReLU(alpha=.1)(cat_max_avg)
         # pyramid levels
-        att_L = Conv2D(self.nf, 1)(att)
+        att_L = Conv2D(self.nf, 1, name='Pyramid_levels')(att)
         att_L = LeakyReLU(alpha=.1)(att_L)
         att_max = Lambda(lambda x: K.spatial_2d_padding(x))(att_L)
         att_max = MaxPool2D(pool_size=(3, 3), strides=(2, 2))(att_max)
@@ -199,8 +198,8 @@ class EDVR:
         att_add = Conv2D(self.nf, 1)(att)
         att_add = LeakyReLU(alpha=.1)(att_add)
         att_add = Conv2D(self.nf, 1)(att_add)
-        att = Lambda(lambda x: K.sigmoid(x))(att)
-        fea = Lambda(lambda x: x[0]*x[1]*2 + x[2])([fea, att, att_add])
+        att = Lambda(lambda x: K.sigmoid(x), name='pyramid_level_attributes')(att)
+        fea = Lambda(lambda x: x[0]*x[1]*2 + x[2], name='pyramid_level_features')([fea, att, att_add])
         return fea
     
     def get_EDVR_model(self):
@@ -210,7 +209,7 @@ class EDVR:
         # L1
         if self.is_predeblur:
             L1_fea = self.__Predeblur_ResNet_Pyramid(x_reshaped)
-            L1_fea = Conv2D(self.nf, 1)(L1_fea)
+            L1_fea = Conv2D(self.nf, 1, name='post_predeblur_conv')(L1_fea)
             if self.HR_in:
                 self.H, self.W = self.H // 4, self.W // 4
         else:
@@ -227,9 +226,10 @@ class EDVR:
         # L3
         L3_fea = self.__conv2_block(L2_fea)
         L3_fea = self.__conv1_block(L3_fea)
-        L1_fea = Lambda(lambda x: K.reshape(x, (-1, self.nframes, self.H, self.W, self.C)))(L1_fea)
-        L2_fea = Lambda(lambda x: K.reshape(x, (-1, self.nframes, self.H//2, self.W//2, self.C)))(L2_fea)
-        L3_fea = Lambda(lambda x: K.reshape(x, (-1, self.nframes, self.H//4, self.W//4, self.C)))(L3_fea)
+        
+        L1_fea = Lambda(lambda x: K.reshape(x, (-1, self.nframes, self.H, self.W, self.nf)))(L1_fea)
+        L2_fea = Lambda(lambda x: K.reshape(x, (-1, self.nframes, self.H//2, self.W//2, self.nf)))(L2_fea)
+        L3_fea = Lambda(lambda x: K.reshape(x, (-1, self.nframes, self.H//4, self.W//4, self.nf)))(L3_fea)
 
         #### pcd align
         # ref feature list
@@ -243,25 +243,25 @@ class EDVR:
                          Lambda(lambda x: x[:, i, :, :, :])(L3_fea)]
             aligned_fea.append(self.__PCD_Align(nbr_fea_l, ref_fea_l))
 
-        aligned_fea = Lambda(lambda x: K.stack(x, axis=1))(aligned_fea)
+        aligned_fea = Lambda(lambda x: K.stack(x, axis=1), name='PCD_aligned_features')(aligned_fea)
 
         fea = self.__TSA_Fusion(aligned_fea)
 
         for _ in range(self.back_RBs):
             fea = self.__ResidualBlock_noBN(fea)
 
-        out = Subpixel(self.nf, 3, 2, padding='same')(fea)
+        out = Subpixel(self.nf, 3, 2, padding='same', name='subpixel1')(fea)
         out = LeakyReLU(alpha=.1)(out)
-        out = Subpixel(64, 3, 2, padding='same')(out)
+        out = Subpixel(64, 3, 2, padding='same', name='subpixel2')(out)
         out = LeakyReLU(alpha=.1)(out)
-        out = Conv2D(64, 3, padding='same')(out) # HR conv
+        out = Conv2D(64, 3, padding='same', name='HR_conv')(out) # HR conv
         out = LeakyReLU(alpha=.1)(out)
-        out = Conv2D(3, 3, padding='same')(out) # Conv last
+        out = Conv2D(3, 3, padding='same', name='last_conv')(out) # Conv last
         if self.HR_in:
             base = x_center
         else:
             base = UpSampling2D(size=(4, 4), interpolation='bilinear')(x_center)
-        out = add([out, base])
+        out = add([out, base], name='output')
         return Model(input_x, out, name='EDVR')
 
 
