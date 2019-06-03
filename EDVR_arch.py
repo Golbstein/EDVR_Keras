@@ -18,6 +18,10 @@ from subpixel import *
 from keras.models import Model
 
 
+# Paper's loss function
+def charbonnier_penalty(y_true, y_pred):
+    return K.mean(K.sqrt(1e-3 + K.square(y_pred - y_true)), [1,2,3])
+
 class EDVR:
         
         
