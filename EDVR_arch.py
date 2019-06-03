@@ -68,7 +68,7 @@ class EDVR:
         L1_fea = add([self.__ResidualBlock_noBN(L1_fea), L2_fea])
         out = self.__ResidualBlock_noBN(L1_fea)
         for i in range(2):
-            out = ResidualBlock_noBN(out)
+            out = self.__ResidualBlock_noBN(out)
         return out
 
     def __PCD_Align(self, nbr_fea_l, ref_fea_l):
