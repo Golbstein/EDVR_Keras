@@ -210,7 +210,7 @@ class EDVR:
             L1_fea = self.__conv_block(x_reshaped)
             if self.HR_in:
                 for i in range(2):
-                    L1_fea = self.__conv2_block(L1_fea)
+                    L1_fea = self.__conv_block(L1_fea, 2)
                 self.H, self.W = self.H // 4, self.W // 4
         for _ in range(self.front_RBs):
             L1_fea = self.__ResidualBlock_noBN(L1_fea)
