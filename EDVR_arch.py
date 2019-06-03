@@ -58,7 +58,7 @@ class EDVR:
         if self.HR_in:
             for i in range(2):
                 L1_fea = self.__conv2_block(L1_fea)
-        L2_fea = self.__conv2_block(L2_fea)
+        L2_fea = self.__conv2_block(L1_fea)
         L3_fea = self.__conv2_block(L2_fea)
         L3_fea = self.__ResidualBlock_noBN(L3_fea)
         L3_fea = UpSampling2D(interpolation='bilinear')(L3_fea)
