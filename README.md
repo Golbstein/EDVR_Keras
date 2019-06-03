@@ -15,7 +15,7 @@ Keras implementation of **"Video Restoration with Enhanced Deformable Convolutio
 - [x] Temporal Spatial Attention (TSA) Fusion Module
 - [x] Reconstruction Module
 - [x] Pixel shuffle layer (Subpixel)
-
+- [ ] Support changing frame shape (currently supports only fixed shape)
 
 
 # Results
